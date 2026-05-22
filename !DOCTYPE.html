@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Flappy Flight | Difficulty Modes (Easy/Hard)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: linear-gradient(145deg, #0a2f3a 0%, #064e3b 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: 'Courier New', 'VT323', monospace;
+            font-weight: bold;
+        }
+
+        .game-wrapper {
+            background: #00000055;
+            border-radius: 2rem;
+            padding: 1rem;
+            box-shadow: 0 20px 35px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(255, 255, 255, 0.2);
+        }
+
+        canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: 1.2rem;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+            cursor: pointer;
+        }
+
+        .info-panel {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            margin-top: 1rem;
+            background: #1e293bdd;
+            backdrop-filter: blur(6px);
+            padding: 0.6rem 1.5rem;
+            border-radius: 4rem;
+            color: #facc15;
+            text-shadow: 0 2px 3px black;
+            font-size: 1.6rem;
+            font-weight: bold;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .score-card, .best-card {
+            background: #0f172a;
+            padding: 0.3rem 1.2rem;
+            border-radius: 2rem;
+            letter-spacing: 1px;
+        }
+
+        .score-card span, .best-card span {
+            color: #94a3b8;
+            font-size: 1rem;
+            margin-right: 0.5rem;
+        }
+
+        button {
+            background: #fbbf24;
+            border: none;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 1rem;
+            padding: 0.3rem 1rem;
+            border-radius: 2rem;
+            cursor: pointer;
+            transition: all 0.1s ease;
+            color: #0f172a;
+            box-shadow: 0 2px 6px black;
+        }
+        
+        button:hover {
+            background: #f59e0b;
+            transform: scale(0.97);
+        }
+
+        .mode-indicator {
+            background: #0f172a;
+            padding: 0.3rem 1.2rem;
+            border-radius: 2rem;
+            font-size: 1rem;
+            letter-spacing: 1px;
+        }
+
+        .mode-indicator span {
+            color: #facc15;
+            font-weight: bold;
+        }
+
+        .instruction {
+            margin-top: 0.6rem;
+            text-align: center;
+            color: #cbd5e6;
+            background: #00000088;
+            width: fit-content;
+            margin-left: auto;
+            margin-right: auto;
+            padding: 0.3rem 1rem;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            backdrop-filter: blur(2px);
+        }
+
+        @media (max-width: 550px) {
+            .info-panel {
+                font-size: 1.2rem;
+                padding: 0.4rem 1rem;
+            }
+            .score-card span, .best-card span {
+                font-size: 0.8rem;
+            }
+            .instruction {
+                font-size: 0.7rem;
+            }
+            button {
+                font-size: 0.8rem;
+                padding: 0.2rem 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div>
+    <div class="game-wrapper">
+        <canvas id="gameCanvas" width="400" height="600"></canvas>
+        <div class="info-panel">
+            <div class="score-card"><span>🪶 SCORE</span> <span id="currentScore">0</span></div>
+            <div class="best-card"><span>🏆 BEST</span> <span id="bestScore">0</span></div>
+            <div class="mode-indicator"><span>⚙️ MODE: </span><span id="modeDisplay">HARD</span></div>
+            <button id="menuButton">📋 MENU</button>
+        </div>
+        <div class="instruction">
+            🐦 SPACE / CLICK / TAP → FLAP  |  Avoid pipes! (Hard = smaller gap)
+        </div>
+    </div>
+</div>
+
+<script>
+    (function(){
+        // ---------- CANVAS ----------
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // ---------- GAME DIMENSIONS ----------
+        const W = 400, H = 600;
+        
+        // ---------- DIFFICULTY SETTINGS ----------
+        // Easy: wider gap (more space between pipes)
+        // Hard: narrow gap (original hard mode style)
+        const EASY_GAP = 165;     // spacious, easier to fly through
+        const HARD_GAP = 120;     // tight, classic challenge
+        
+        // Other parameters that can vary with difficulty (speed, spawn rate) but we keep pipe gap main difference
+        // But we also slightly adjust pipe speed? No, keep speed same for fairness, but gap is the key.
+        // Additionally we can adjust gravity or jump? Not needed: gap is the main difficulty.
+        let currentGap = HARD_GAP;    // default HARD mode (as requested: game developed initially in hard mode)
+        let currentDifficulty = "HARD";   // "EASY" or "HARD"
+        
+        // ---------- GAME STATES ----------
+        let gameActive = false;      // true = game is running (playing), false = game over OR menu
+        let showStartMenu = true;    // start menu overlay active
+        let score = 0;
+        let bestScore = 0;
+        let bestScoreEasy = 0;
+        let bestScoreHard = 0;
+        
+        // load best scores from localStorage
+        try {
+            const storedEasy = localStorage.getItem('flappyBestEasy');
+            if(storedEasy && !isNaN(parseInt(storedEasy))) bestScoreEasy = parseInt(storedEasy);
+            const storedHard = localStorage.getItem('flappyBestHard');
+            if(storedHard && !isNaN(parseInt(storedHard))) bestScoreHard = parseInt(storedHard);
+        } catch(e) { /* silence */ }
+        
+        function updateBestByMode() {
+            if(currentDifficulty === "EASY") {
+                bestScore = bestScoreEasy;
+            } else {
+                bestScore = bestScoreHard;
+            }
+            document.getElementById('bestScore').innerText = bestScore;
+        }
+        
+        function saveBestForCurrentMode() {
+            if(currentDifficulty === "EASY") {
+                if(score > bestScoreEasy) {
+                    bestScoreEasy = score;
+                    try { localStorage.setItem('flappyBestEasy', bestScoreEasy); } catch(e) {}
+                    bestScore = bestScoreEasy;
+                }
+            } else {
+                if(score > bestScoreHard) {
+                    bestScoreHard = score;
+                    try { localStorage.setItem('flappyBestHard', bestScoreHard); } catch(e) {}
+                    bestScore = bestScoreHard;
+                }
+            }
+            document.getElementById('bestScore').innerText = bestScore;
+        }
+        
+        function updateScoreUI() {
+            document.getElementById('currentScore').innerText = score;
+        }
+        
+        function updateModeUI() {
+            document.getElementById('modeDisplay').innerText = currentDifficulty;
+        }
+        
+        // ---------- BIRD ----------
+        const BIRD_RADIUS = 14;
+        let bird = {
+            x: 70,
+            y: H/2,
+            velocity: 0,
+            gravity: 0.25,
+            jumpPower: -5.2,
+            rotation: 0
+        };
+        
+        // ---------- PIPE SYSTEM ----------
+        const PIPE_WIDTH = 55;
+        const PIPE_SPACING = 210;      // distance between pipe centers
+        let pipes = [];
+        let scrollSpeed = 2.5;          // constant speed
+        
+        // helper: random pipe top based on current gap
+        function randomPipeTop() {
+            const minTop = 45;
+            const maxTop = H - currentGap - 45;
+            return Math.floor(Math.random() * (maxTop - minTop + 1) + minTop);
+        }
+        
+        // reset pipes for new game
+        function resetPipes() {
+            pipes = [];
+            pipes.push({
+                x: W + 50,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING * 2,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+        }
+        
+        // add new pipe dynamically
+        function maybeAddPipe() {
+            if(pipes.length === 0) {
+                pipes.push({
+                    x: W,
+                    topHeight: randomPipeTop(),
+                    width: PIPE_WIDTH,
+                    gap: currentGap,
+                    counted: false
+                });
+                return;
+            }
+            const lastPipe = pipes[pipes.length-1];
+            if(lastPipe.x <= W - PIPE_SPACING + 30) {
+                pipes.push({
+                    x: W,
+                    topHeight: randomPipeTop(),
+                    width: PIPE_WIDTH,
+                    gap: currentGap,
+                    counted: false
+                });
+            }
+        }
+        
+        // update pipes: movement, collision, scoring (only if gameActive)
+        function updatePipes() {
+            for(let i=0; i<pipes.length; i++) {
+                pipes[i].x -= scrollSpeed;
+            }
+            pipes = pipes.filter(pipe => pipe.x + PIPE_WIDTH > 0);
+            maybeAddPipe();
+            
+            if(gameActive) {
+                for(let i=0; i<pipes.length; i++) {
+                    const pipe = pipes[i];
+                    const birdLeft = bird.x - BIRD_RADIUS;
+                    const birdRight = bird.x + BIRD_RADIUS;
+                    const birdTop = bird.y - BIRD_RADIUS;
+                    const birdBottom = bird.y + BIRD_RADIUS;
+                    
+                    const topPipeRect = {
+                        left: pipe.x,
+                        right: pipe.x + PIPE_WIDTH,
+                        top: 0,
+                        bottom: pipe.topHeight
+                    };
+                    const bottomPipeRect = {
+                        left: pipe.x,
+                        right: pipe.x + PIPE_WIDTH,
+                        top: pipe.topHeight + pipe.gap,
+                        bottom: H
+                    };
+                    
+                    if(birdRight > topPipeRect.left && birdLeft < topPipeRect.right &&
+                       birdBottom > topPipeRect.top && birdTop < topPipeRect.bottom) {
+                        gameActive = false;
+                        showStartMenu = false;   // game over, but no menu automatically, show game over msg and restart via menu
+                    }
+                    if(birdRight > bottomPipeRect.left && birdLeft < bottomPipeRect.right &&
+                       birdBottom > bottomPipeRect.top && birdTop < bottomPipeRect.bottom) {
+                        gameActive = false;
+                        showStartMenu = false;
+                    }
+                    
+                    if(!pipe.counted && (pipe.x + PIPE_WIDTH) < bird.x) {
+                        pipe.counted = true;
+                        score++;
+                        updateScoreUI();
+                        if(score > bestScore) {
+                            saveBestForCurrentMode();
+                        }
+                    }
+                }
+            }
+        }
+        
+        function handleBirdPhysics() {
+            if(!gameActive) return;
+            bird.velocity += bird.gravity;
+            bird.y += bird.velocity;
+            bird.rotation = Math.min(Math.max(bird.velocity * 0.12, -0.8), 0.9);
+            
+            if(bird.y - BIRD_RADIUS <= 0) {
+                bird.y = BIRD_RADIUS;
+                gameActive = false;
+                showStartMenu = false;
+            }
+            if(bird.y + BIRD_RADIUS >= H) {
+                bird.y = H - BIRD_RADIUS;
+                gameActive = false;
+                showStartMenu = false;
+            }
+        }
+        
+        function flap() {
+            if(!gameActive) return;
+            bird.velocity = bird.jumpPower;
+            bird.rotation = -0.45;
+        }
+        
+        // ---------- START GAME WITH SELECTED MODE ----------
+        function startGameWithMode(difficulty) {
+            currentDifficulty = difficulty;
+            currentGap = (difficulty === "EASY") ? EASY_GAP : HARD_GAP;
+            updateModeUI();
+            updateBestByMode();
+            
+            // reset game state
+            gameActive = true;
+            showStartMenu = false;
+            score = 0;
+            updateScoreUI();
+            
+            // reset bird
+            bird.y = H/2;
+            bird.velocity = 0;
+            bird.rotation = 0;
+            
+            // reset pipes with current gap
+            pipes = [];
+            pipes.push({
+                x: W + 50,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING * 2,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+        }
+        
+        // show menu (reset everything, cancel active game)
+        function showMenu() {
+            gameActive = false;
+            showStartMenu = true;
+            // keep current difficulty but no game active
+            updateModeUI();
+            updateBestByMode();
+            // reset visual score but don't lose best
+            score = 0;
+            updateScoreUI();
+            // reset bird position for menu preview
+            bird.y = H/2;
+            bird.velocity = 0;
+            bird.rotation = 0;
+            // reset pipes to initial for preview while menu open?
+            pipes = [];
+            pipes.push({
+                x: W + 50,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+            pipes.push({
+                x: W + 50 + PIPE_SPACING * 2,
+                topHeight: randomPipeTop(),
+                width: PIPE_WIDTH,
+                gap: currentGap,
+                counted: false
+            });
+        }
+        
+        // ---------- DRAWING (graphics) ----------
+        function drawBackground() {
+            const grad = ctx.createLinearGradient(0, 0, 0, H);
+            grad.addColorStop(0, '#0f172a');
+            grad.addColorStop(0.5, '#1e3a4d');
+            grad.addColorStop(1, '#14532d');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, W, H);
+            
+            ctx.fillStyle = "#ffffffaa";
+            ctx.beginPath();
+            ctx.ellipse(70, 80, 40, 30, 0, 0, Math.PI*2);
+            ctx.ellipse(110, 70, 35, 28, 0, 0, Math.PI*2);
+            ctx.ellipse(140, 90, 32, 26, 0, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(300, 150, 45, 32, 0, 0, Math.PI*2);
+            ctx.ellipse(340, 140, 38, 28, 0, 0, Math.PI*2);
+            ctx.ellipse(275, 140, 32, 26, 0, 0, Math.PI*2);
+            ctx.fill();
+            
+            ctx.fillStyle = '#4a6b2f';
+            ctx.fillRect(0, H-35, W, 35);
+            ctx.fillStyle = '#6b4c2b';
+            ctx.fillRect(0, H-33, W, 8);
+            ctx.fillStyle = '#c9a87b';
+            for(let i=0;i<12;i++) ctx.fillRect(i*45, H-28, 10, 6);
+            ctx.fillStyle = '#eab308';
+            for(let i=0;i<8;i++) {
+                ctx.beginPath();
+                ctx.moveTo(i*55+20, H-38);
+                ctx.lineTo(i*55+25, H-45);
+                ctx.lineTo(i*55+30, H-38);
+                ctx.fill();
+            }
+        }
+        
+        function drawPipes() {
+            for(let pipe of pipes) {
+                ctx.fillStyle = '#2d6a4f';
+                ctx.fillRect(pipe.x, 0, PIPE_WIDTH, pipe.topHeight);
+                ctx.fillStyle = '#1f543b';
+                ctx.fillRect(pipe.x-6, pipe.topHeight-40, PIPE_WIDTH+12, 40);
+                ctx.fillStyle = '#40916c';
+                ctx.fillRect(pipe.x-3, pipe.topHeight-35, PIPE_WIDTH+6, 30);
+                ctx.fillStyle = '#d4a373';
+                ctx.fillRect(pipe.x-2, pipe.topHeight-10, PIPE_WIDTH+4, 12);
+                
+                const bottomY = pipe.topHeight + pipe.gap;
+                ctx.fillStyle = '#2d6a4f';
+                ctx.fillRect(pipe.x, bottomY, PIPE_WIDTH, H - bottomY);
+                ctx.fillStyle = '#1f543b';
+                ctx.fillRect(pipe.x-6, bottomY, PIPE_WIDTH+12, 40);
+                ctx.fillStyle = '#40916c';
+                ctx.fillRect(pipe.x-3, bottomY+5, PIPE_WIDTH+6, 30);
+                ctx.fillStyle = '#d4a373';
+                ctx.fillRect(pipe.x-2, bottomY-2, PIPE_WIDTH+4, 12);
+            }
+        }
+        
+        function drawBird() {
+            ctx.save();
+            ctx.translate(bird.x, bird.y);
+            ctx.rotate(bird.rotation);
+            ctx.shadowBlur = 4;
+            ctx.beginPath();
+            ctx.ellipse(0, 0, BIRD_RADIUS, BIRD_RADIUS*0.9, 0, 0, Math.PI*2);
+            ctx.fillStyle = '#facc15';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.ellipse(3, -3, 4, 5, 0, 0, Math.PI*2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+            ctx.fillStyle = '#000000';
+            ctx.beginPath();
+            ctx.arc(5, -4, 1.5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(10, -2);
+            ctx.lineTo(16, -1);
+            ctx.lineTo(10, 2);
+            ctx.fillStyle = '#f97316';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-6, 2);
+            ctx.quadraticCurveTo(-2, 9, 4, 5);
+            ctx.fillStyle = '#eab308';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(2, 2, 2, 0, Math.PI*2);
+            ctx.fillStyle = '#f43f5e77';
+            ctx.fill();
+            ctx.restore();
+        }
+        
+        function drawScoreInGame() {
+            if(gameActive || (!showStartMenu && !gameActive)) {
+                ctx.font = "bold 32px 'Courier New'";
+                ctx.fillStyle = "#fff7ed";
+                ctx.shadowBlur = 3;
+                ctx.fillText(""+score, W-45, 55);
+                ctx.font = "bold 16px monospace";
+                ctx.fillStyle = "#fde047";
+                ctx.fillText("FLAPS", W-70, 85);
+                ctx.shadowBlur = 0;
+            }
+        }
+        
+        function drawGameOverlay() {
+            if(!gameActive && !showStartMenu) {
+                ctx.fillStyle = "rgba(0,0,0,0.7)";
+                ctx.fillRect(0, 0, W, H);
+                ctx.font = "bold 28px 'Courier New'";
+                ctx.fillStyle = "#facc15";
+                ctx.textAlign = "center";
+                ctx.fillText("💀 GAME OVER", W/2, H/2 - 40);
+                ctx.font = "bold 16px monospace";
+                ctx.fillStyle = "#cbd5e1";
+                ctx.fillText("Click MENU to choose mode", W/2, H/2 + 20);
+                ctx.font = "14px monospace";
+                ctx.fillStyle = "#facc15";
+                ctx.fillText("score: "+score, W/2, H/2 + 65);
+                ctx.textAlign = "left";
+            }
+        }
+        
+        function drawStartMenu() {
+            if(!showStartMenu) return;
+            ctx.fillStyle = "rgba(0,20,30,0.85)";
+            ctx.fillRect(0, 0, W, H);
+            ctx.font = "bold 34px 'Courier New'";
+            ctx.fillStyle = "#facc15";
+            ctx.textAlign = "center";
+            ctx.fillText("FLAPPY FLIGHT", W/2, 100);
+            ctx.font = "bold 20px monospace";
+            ctx.fillStyle = "#e2e8f0";
+            ctx.fillText("Select Difficulty", W/2, 180);
+            
+            // Easy button area
+            ctx.fillStyle = "#2dd4bf";
+            ctx.shadowBlur = 2;
+            ctx.fillRect(W/2 - 110, 230, 100, 50);
+            ctx.fillStyle = "#0f172a";
+            ctx.font = "bold 22px monospace";
+            ctx.fillText("EASY", W/2 - 65, 265);
+            ctx.fillStyle = "#f97316";
+            ctx.fillRect(W/2 + 10, 230, 100, 50);
+            ctx.fillStyle = "#0f172a";
+            ctx.fillText("HARD", W/2 + 55, 265);
+            
+            ctx.font = "14px monospace";
+            ctx.fillStyle = "#cbd5e6";
+            ctx.fillText("Easy: wide gap  🟢", W/2, 330);
+            ctx.fillText("Hard: narrow gap  🔴", W/2, 360);
+            ctx.font = "12px monospace";
+            ctx.fillStyle = "#facc15";
+            ctx.fillText("click on button to start", W/2, 420);
+            
+            // display current best per mode
+            ctx.font = "bold 12px monospace";
+            ctx.fillStyle = "#a5f3fc";
+            ctx.fillText(`🏆 BEST EASY: ${bestScoreEasy}    |    BEST HARD: ${bestScoreHard}`, W/2, 480);
+            ctx.textAlign = "left";
+            
+            // draw little bird and pipes preview
+            drawBird();
+            // also preview pipes at static spots for ambiance
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = '#2d6a4f';
+            ctx.fillRect(280, 0, PIPE_WIDTH, 100);
+            ctx.fillRect(280, 100+ (currentDifficulty === "EASY"? EASY_GAP : HARD_GAP), PIPE_WIDTH, H-100- (currentDifficulty === "EASY"? EASY_GAP : HARD_GAP));
+            ctx.fillStyle = '#d4a373';
+            ctx.fillRect(278, 90, PIPE_WIDTH+4, 12);
+            ctx.fillRect(278, 100+ (currentDifficulty === "EASY"? EASY_GAP : HARD_GAP)-12, PIPE_WIDTH+4, 12);
+            ctx.globalAlpha = 1;
+        }
+        
+        // -------- MAIN LOOP ----------
+        function gameLoop() {
+            if(gameActive) {
+                handleBirdPhysics();
+                updatePipes();
+            }
+            
+            drawBackground();
+            drawPipes();
+            drawBird();
+            drawScoreInGame();
+            drawGameOverlay();
+            drawStartMenu();
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // -------- EVENT HANDLERS ----------
+        function handleFlap(e) {
+            if(gameActive) {
+                if(e.type === 'keydown' && (e.code === 'Space' || e.code === 'ArrowUp')) {
+                    e.preventDefault();
+                    flap();
+                } else if(e.type === 'click' || e.type === 'touchstart') {
+                    if(!showStartMenu && gameActive) flap();
+                    e.preventDefault();
+                }
+            }
+        }
+        
+        // menu button interaction
+        function setupUI() {
+            const menuBtn = document.getElementById('menuButton');
+            menuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showMenu();
+            });
+            
+            // canvas click for flap (only when game active)
+            canvas.addEventListener('click', (e) => {
+                if(gameActive && !showStartMenu) flap();
+                else if(showStartMenu) {
+                    // handle menu selection based on click coordinates
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    let mouseX = (e.clientX - rect.left) * scaleX;
+                    let mouseY = (e.clientY - rect.top) * scaleY;
+                    if(mouseY >= 230 && mouseY <= 280) {
+                        if(mouseX >= W/2 - 110 && mouseX <= W/2 - 10) {
+                            startGameWithMode("EASY");
+                        } else if(mouseX >= W/2 + 10 && mouseX <= W/2 + 110) {
+                            startGameWithMode("HARD");
+                        }
+                    }
+                }
+            });
+            
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if(gameActive && !showStartMenu) flap();
+                else if(showStartMenu && e.touches.length) {
+                    const rect = canvas.getBoundingClientRect();
+                    const touch = e.touches[0];
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    let touchX = (touch.clientX - rect.left) * scaleX;
+                    let touchY = (touch.clientY - rect.top) * scaleY;
+                    if(touchY >= 230 && touchY <= 280) {
+                        if(touchX >= W/2 - 110 && touchX <= W/2 - 10) startGameWithMode("EASY");
+                        else if(touchX >= W/2 + 10 && touchX <= W/2 + 110) startGameWithMode("HARD");
+                    }
+                }
+            });
+            
+            window.addEventListener('keydown', (e) => {
+                if(e.code === 'Space' || e.code === 'ArrowUp') {
+                    if(gameActive && !showStartMenu) flap();
+                    e.preventDefault();
+                }
+                if(e.code === 'Escape') {
+                    showMenu();
+                    e.preventDefault();
+                }
+            });
+        }
+        
+        // initialize: show start menu
+        function init() {
+            // default hard mode as pre-selected for display preview
+            currentDifficulty = "HARD";
+            currentGap = HARD_GAP;
+            updateModeUI();
+            updateBestByMode();
+            showStartMenu = true;
+            gameActive = false;
+            score = 0;
+            updateScoreUI();
+            bird.y = H/2;
+            resetPipes();
+            setupUI();
+            gameLoop();
+        }
+        
+        init();
+    })();
+</script>
+</body>
+</html>
